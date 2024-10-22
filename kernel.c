@@ -15,6 +15,10 @@ struct nodDe{
     __u32 ipadd;
     __u16 dest;
     __u16 source;
+    __u64 time_insert;
+};
+struct node_index{
+    __u32 index;
 };
 struct Semp{
     struct bpf_spin_lock semaphore;
@@ -23,6 +27,7 @@ struct Semp{
 BPF_ARRAY(double_linked,struct nodDe,10);
 BPF_ARRAY(head_tail,__u32,2);
 BPF_ARRAY(semaphore_for_map,struct Semp,1);
+BPF_HASH(idx_from_ip_ports,__u64,struct node_index,10);
 
 int xdp_tcp_syn(struct xdp_md *ctx) {
     int zero = 0;
@@ -81,6 +86,9 @@ int xdp_tcp_syn(struct xdp_md *ctx) {
         tcp->cwr || 
         tcp->rst )){
         if (tcp->syn && !tcp->ack) {
+            //if has empty space pass packet and add to hash map
+            //else if top is older then remove top and pass packet
+            //else drop packet
             bpf_trace_printk("TCP SYN packet detected!\n");
             return XDP_PASS;
         }
@@ -89,6 +97,8 @@ int xdp_tcp_syn(struct xdp_md *ctx) {
             return XDP_PASS;
         }
         if (!tcp->syn && tcp->ack) {
+            //if exists the ip port port then remove it
+            //else pass
             bpf_trace_printk("TCP ACK packet detected!\n");
             return XDP_PASS;
         }
