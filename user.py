@@ -16,7 +16,7 @@ b = BPF(src_file="kernel.c")
 interface = "enp0s3"
 
 double_linked = b.get_table("double_linked")
-head_tail = b.get_table("head_tail")
+head_tail_size = b.get_table("head_tail_size")
 for i in range(10):
     if(i==9):
         entry = MyStruct(data = i,prev = i-1,next = 0,is_used = 0)
@@ -26,8 +26,9 @@ for i in range(10):
     double_linked[i] = entry
     
 
-head_tail[0] = ctypes.c_int(1)
-head_tail[1] = ctypes.c_int(size_of_queue - 1)
+head_tail_size[0] = ctypes.c_int(1)
+head_tail_size[1] = ctypes.c_int(size_of_queue - 1)
+head_tail_size[2] = ctypes.c_int(0)
 
 '''
 zero = 0
