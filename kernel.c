@@ -7,6 +7,9 @@
 #include <bcc/proto.h>
 #include <linux/pkt_cls.h>
 
+
+#define extra_time  1000
+
 struct __u128 {
     __u64 hi; // Higher 64 bits for IPv6
     __u64 lo; // Lower 64 bits for IPv6
@@ -50,7 +53,7 @@ BPF_ARRAY(semaphore_for_map,struct Semp,1);
 BPF_HASH(idx_from_ip_ports,struct packet_id_key,struct node_index,10);
 
 int xdp_tcp_syn(struct xdp_md *ctx) {
-    int zero = 0;
+    int zero = 0,one = 1, two = 2;
     struct packet_id_key packet_key;
     struct Semp *s = semaphore_for_map.lookup(&zero);
     if(!s){ 
@@ -115,10 +118,65 @@ int xdp_tcp_syn(struct xdp_md *ctx) {
         tcp->cwr || 
         tcp->rst )){
         if (tcp->syn && !tcp->ack) {
+            struct node_index *index = idx_from_ip_ports.lookup(&packet_key);
             //if the ip ports are already there then just drop
-            //if has empty space pass packet and add to hash map
-            //else if top is older then remove top and pass packet
-            //else drop packet
+            if(index){
+                return XDP_DROP;
+            }
+
+            //if head of queue is empty add the packet
+            __u32 *head = head_tail_size.lookup(&zero);
+            if(!head){
+                return XDP_PASS;
+            }
+            struct queue_node *head_node = double_linked.lookup(head); 
+            if(!head_node){
+                return XDP_PASS;
+            }
+            if(head_node->is_used){
+                __u64 curr_time = bpf_ktime_get_ns();
+                if(head_node->time_insert + extra_time < curr_time){
+                    return XDP_DROP;
+                }
+                else{
+                    //remove the head from hash and then insert new packet to hash and then to tail
+                    struct packet_id_key old_packet_key;
+                    old_packet_key.ip_type = head_node->ip_type;
+                    old_packet_key.source = head_node->source;
+                    old_packet_key.dest = head_node->dest;
+                    if(old_packet_key.ip_type==1){
+                        old_packet_key.ipadd.ipv4 = head_node->ipadd.ipv4;
+                    }
+                    else{
+                        __builtin_memcpy(&old_packet_key.ipadd.ipv6, &head_node->ipadd.ipv6, sizeof(struct in6_addr));
+                    }
+                    /*
+                    __u32 res = bpf_map_delete_elem(&idx_from_ip_ports,&old_packet_key);
+                    if(res==0){
+
+                    }
+                    else{
+
+                    }*/
+                    head_node->ip_type = packet_key.ip_type;
+                    
+                    if(head_node->ip_type==1){
+                        head_node->ipadd.ipv4 = packet_key.ipadd.ipv4;
+                    }
+                    else{
+                        __builtin_memcpy(&head_node->ipadd.ipv6, &packet_key.ipadd.ipv6, sizeof(struct in6_addr));
+                    }
+                    //head = head_node->next
+                    head_node->next = 0;
+                    //head_node->prev = tail;
+                    //tail_node->next = head;
+                    //tail = head_node
+                }
+            }
+            else{
+                //insert new packet into hash and insert to tail of queue 
+            }
+
             bpf_trace_printk("TCP SYN packet detected!\n");
             return XDP_PASS;
         }
@@ -127,7 +185,7 @@ int xdp_tcp_syn(struct xdp_md *ctx) {
             return XDP_PASS;
         }
         if (!tcp->syn && tcp->ack) {
-            //if exists the ip port port then remove it
+            //if exists the ip port port then remove it and free the space in the queue
             //else pass
             bpf_trace_printk("TCP ACK packet detected!\n");
             return XDP_PASS;
