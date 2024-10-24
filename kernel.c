@@ -167,14 +167,57 @@ int xdp_tcp_syn(struct xdp_md *ctx) {
                         __builtin_memcpy(&head_node->ipadd.ipv6, &packet_key.ipadd.ipv6, sizeof(struct in6_addr));
                     }
                     //head = head_node->next
+                    head_tail_size.update(&zero,&head_node->next);
+
                     head_node->next = 0;
+
+                    //insert into hash map
+                    idx_from_ip_ports.update(&packet_key,&head_node->data);
+
                     //head_node->prev = tail;
+                    __u32 *tail = head_tail_size.lookup(&one);
+                    head_node->prev = *tail;
+
                     //tail_node->next = head;
+                    struct queue_node *tail_node = double_linked.lookup(tail);
+                    tail_node->next = head_node->data;
+                    double_linked.update(tail_node);
+
                     //tail = head_node
+                    head_tail_size.update(&one,&head_node->data);
+                    queue_node.update(head_node);
                 }
             }
             else{
                 //insert new packet into hash and insert to tail of queue 
+                head_node->ip_type = packet_key.ip_type;
+                    
+                if(head_node->ip_type==1){
+                    head_node->ipadd.ipv4 = packet_key.ipadd.ipv4;
+                }
+                else{
+                    __builtin_memcpy(&head_node->ipadd.ipv6, &packet_key.ipadd.ipv6, sizeof(struct in6_addr));
+                }
+                //head = head_node->next
+                head_tail_size.update(&zero,&head_node->next);
+
+                //insert into hash map
+                idx_from_ip_ports.update(&packet_key,&head_node->data);
+
+                //head_node->prev = tail;
+                __u32 *tail = head_tail_size.lookup(&one);
+                head_node->prev = *tail;
+
+                //tail_node->next = head;
+                struct queue_node *tail_node = double_linked.lookup(tail),*next_node = double_linked.lookup(&head_node->next);
+                tail_node->next = head_node->data;
+                double_linked.update(&tail_node->data,tail_node);
+                head_node->next = 0;
+                next_node->prev = 0;
+                //tail = head_node
+                head_tail_size.update(&one,&head_node->data);
+                double_linked.update(&head_node->data,head_node);
+                double_linked.update(&next_node->data,next_node);
             }
 
             bpf_trace_printk("TCP SYN packet detected!\n");
@@ -185,8 +228,32 @@ int xdp_tcp_syn(struct xdp_md *ctx) {
             return XDP_PASS;
         }
         if (!tcp->syn && tcp->ack) {
-            //if exists the ip port port then remove it and free the space in the queue
-            //else pass
+            struct node_index *index = idx_from_ip_ports.lookup(&packet_key);
+            if(!index){
+                return XDP_DROP;
+            }
+            struct queue_node *curr_node = double_linked.lookup(&index);
+            struct queue_node *prev_node,*next_node;
+            prev_node = double_linked.lookup(&curr_node->prev);
+            next_node = double_linked.lookup(&next_node->prev);
+            //implement the remove from the hash
+
+            //connect queue
+            prev_node->next = curr_node->next;
+            next_node->prev = curr_node->prev;
+            double_linked.update(&prev_node->data,prev_node);
+            double_linked.update(&next_node->data,next_node);
+
+            //add curr_node to the head 
+            curr_node->is_used = 0;
+            __u32 *head = head_tail_size.lookup(&zero);
+            struct queue_node *head_node = double_linked.lookup(head); 
+            head_node->prev = curr_node->data;
+            curr_node->prev = 0;
+            curr_node->next = head_node->data;
+            double_linked.update(&head_node->data,head_node);
+            head_tail_size.update(&zero,&curr_node->data);
+            double_linked.update(&curr_node->data,curr_node);
             bpf_trace_printk("TCP ACK packet detected!\n");
             return XDP_PASS;
         }
