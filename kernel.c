@@ -107,10 +107,6 @@ int xdp_tcp_syn(struct xdp_md *ctx) {
     }
     packet_key.dest = tcp->dest;
     packet_key.source = tcp->source;
-    /*
-    __u16 a=tcp->dest,b=tcp->source;
-    bpf_trace_printk("%d %d",a,b);
-    */
     if(!(tcp->fin  ||
         tcp->psh || 
         tcp->urg || 
@@ -150,22 +146,19 @@ int xdp_tcp_syn(struct xdp_md *ctx) {
                     else{
                         __builtin_memcpy(&old_packet_key.ipadd.ipv6, &head_node->ipadd.ipv6, sizeof(struct in6_addr));
                     }
-                    /*
-                    __u32 res = bpf_map_delete_elem(&idx_from_ip_ports,&old_packet_key);
-                    if(res==0){
-
-                    }
-                    else{
-
-                    }*/
-                    head_node->ip_type = packet_key.ip_type;
                     
+                    bpf_map_delete_elem(&idx_from_ip_ports,&old_packet_key);
+
+                    head_node->ip_type = packet_key.ip_type;
+                    head_node->time_insert = curr_time;
                     if(head_node->ip_type==1){
                         head_node->ipadd.ipv4 = packet_key.ipadd.ipv4;
                     }
                     else{
                         __builtin_memcpy(&head_node->ipadd.ipv6, &packet_key.ipadd.ipv6, sizeof(struct in6_addr));
                     }
+                    head_node->source = packet_key.source;
+                    head_node->dest = packet_key.dest;
                     //head = head_node->next
                     head_tail_size.update(&zero,&head_node->next);
 
@@ -186,6 +179,8 @@ int xdp_tcp_syn(struct xdp_md *ctx) {
                     //tail = head_node
                     head_tail_size.update(&one,&head_node->data);
                     queue_node.update(head_node);
+
+                    return XDP_PASS;
                 }
             }
             else{
@@ -198,6 +193,10 @@ int xdp_tcp_syn(struct xdp_md *ctx) {
                 else{
                     __builtin_memcpy(&head_node->ipadd.ipv6, &packet_key.ipadd.ipv6, sizeof(struct in6_addr));
                 }
+                head_node->source = packet_key.source;
+                head_node->dest = packet_key.dest;
+                head_node->time_insert = bpf_ktime_get_ns();
+                head_node->is_used = 1;
                 //head = head_node->next
                 head_tail_size.update(&zero,&head_node->next);
 
@@ -218,6 +217,8 @@ int xdp_tcp_syn(struct xdp_md *ctx) {
                 head_tail_size.update(&one,&head_node->data);
                 double_linked.update(&head_node->data,head_node);
                 double_linked.update(&next_node->data,next_node);
+
+                return XDP_PASS;
             }
 
             bpf_trace_printk("TCP SYN packet detected!\n");
@@ -236,8 +237,10 @@ int xdp_tcp_syn(struct xdp_md *ctx) {
             struct queue_node *prev_node,*next_node;
             prev_node = double_linked.lookup(&curr_node->prev);
             next_node = double_linked.lookup(&next_node->prev);
-            //implement the remove from the hash
 
+            //implement the remove from the hash
+            bpf_map_delete_elem(&idx_from_ip_ports,&packet_key);
+            
             //connect queue
             prev_node->next = curr_node->next;
             next_node->prev = curr_node->prev;
