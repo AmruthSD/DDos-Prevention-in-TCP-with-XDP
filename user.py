@@ -7,7 +7,7 @@ import sys
 import ctypes
 
 
-size_of_queue = 10
+size_of_queue = 1000
 class MyStruct(ctypes.Structure):
     _fields_ = [("data", ctypes.c_int),
                 ("prev", ctypes.c_int),("next", ctypes.c_int),("is_used",ctypes.c_uint8)]

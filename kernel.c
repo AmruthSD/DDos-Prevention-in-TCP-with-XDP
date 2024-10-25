@@ -7,7 +7,7 @@
 #include <bcc/proto.h>
 #include <linux/pkt_cls.h>
 
-
+#define SIZEOFQUEUE 1000
 #define extra_time  1000
 
 struct __u128 {
@@ -47,25 +47,26 @@ struct Semp{
     struct bpf_spin_lock semaphore;
 };
 
-BPF_ARRAY(double_linked,struct queue_node,10);
+BPF_ARRAY(double_linked,struct queue_node,SIZEOFQUEUE);
 BPF_ARRAY(head_tail_size,__u32,3);
 BPF_ARRAY(semaphore_for_map,struct Semp,1);
-BPF_HASH(idx_from_ip_ports,struct packet_id_key,struct node_index,10);
+BPF_HASH(idx_from_ip_ports,struct packet_id_key,struct node_index,SIZEOFQUEUE);
 
 int xdp_tcp_syn(struct xdp_md *ctx) {
     int zero = 0,one = 1, two = 2;
     struct packet_id_key packet_key;
-    struct Semp *s = semaphore_for_map.lookup(&zero);
+    /*struct Semp *s = semaphore_for_map.lookup(&zero);
     if(!s){ 
         bpf_trace_printk("Void sem");
         return XDP_PASS;
     }
     bpf_spin_lock(&s->semaphore);
+    bpf_spin_unlock(&s->semaphore);*/
     void *data_end = (void *)(long)ctx->data_end;
     void *data = (void *)(long)ctx->data;
 
     struct ethhdr *eth = data;
-    bpf_spin_unlock(&s->semaphore);
+    
     if ((void *)(eth + 1) > data_end)
         return XDP_PASS;
     
@@ -117,7 +118,9 @@ int xdp_tcp_syn(struct xdp_md *ctx) {
             struct node_index *index = idx_from_ip_ports.lookup(&packet_key);
             //if the ip ports are already there then just drop
             if(index){
-                return XDP_DROP;
+                bpf_trace_printk("Dropping packet due to same index");
+                return XDP_DROP; //actuall has to drop
+                //return XDP_PASS;
             }
 
             //if head of queue is empty add the packet
@@ -132,7 +135,9 @@ int xdp_tcp_syn(struct xdp_md *ctx) {
             if(head_node->is_used){
                 __u64 curr_time = bpf_ktime_get_ns();
                 if(head_node->time_insert + extra_time < curr_time){
-                    return XDP_DROP;
+                    bpf_trace_printk("Dropping due to too many packets");
+                    return XDP_DROP; //actuall has to drop
+                    //return XDP_PASS;
                 }
                 else{
                     //remove the head from hash and then insert new packet to hash and then to tail
@@ -147,7 +152,7 @@ int xdp_tcp_syn(struct xdp_md *ctx) {
                         __builtin_memcpy(&old_packet_key.ipadd.ipv6, &head_node->ipadd.ipv6, sizeof(struct in6_addr));
                     }
                     
-                    bpf_map_delete_elem(&idx_from_ip_ports,&old_packet_key);
+                    //bpf_map_delete_elem(&idx_from_ip_ports,&old_packet_key);
 
                     head_node->ip_type = packet_key.ip_type;
                     head_node->time_insert = curr_time;
@@ -165,25 +170,33 @@ int xdp_tcp_syn(struct xdp_md *ctx) {
                     head_node->next = 0;
 
                     //insert into hash map
-                    idx_from_ip_ports.update(&packet_key,&head_node->data);
+                    idx_from_ip_ports.update(&packet_key,(void*)&head_node->data);
 
                     //head_node->prev = tail;
                     __u32 *tail = head_tail_size.lookup(&one);
+                    if(!tail){
+                        return XDP_PASS;
+                    }
+
                     head_node->prev = *tail;
 
                     //tail_node->next = head;
                     struct queue_node *tail_node = double_linked.lookup(tail);
+                    if(!tail_node){
+                        return XDP_PASS;
+                    }
                     tail_node->next = head_node->data;
-                    double_linked.update(tail_node);
+                    double_linked.update(tail,tail_node);
 
                     //tail = head_node
                     head_tail_size.update(&one,&head_node->data);
-                    queue_node.update(head_node);
+                    double_linked.update(&head_node->data,head_node);
 
                     return XDP_PASS;
                 }
             }
             else{
+                
                 //insert new packet into hash and insert to tail of queue 
                 head_node->ip_type = packet_key.ip_type;
                     
@@ -201,14 +214,23 @@ int xdp_tcp_syn(struct xdp_md *ctx) {
                 head_tail_size.update(&zero,&head_node->next);
 
                 //insert into hash map
-                idx_from_ip_ports.update(&packet_key,&head_node->data);
+                idx_from_ip_ports.update(&packet_key,(void *)&head_node->data);
 
                 //head_node->prev = tail;
                 __u32 *tail = head_tail_size.lookup(&one);
+                if(!tail){
+                    return XDP_PASS;
+                }
                 head_node->prev = *tail;
 
                 //tail_node->next = head;
-                struct queue_node *tail_node = double_linked.lookup(tail),*next_node = double_linked.lookup(&head_node->next);
+                struct queue_node *tail_node = double_linked.lookup(tail),*next_node = double_linked.lookup((void*)&head_node->next);
+                if(!(tail_node)){
+                    return XDP_PASS;
+                }
+                if(!(next_node)){
+                    return XDP_PASS;
+                }
                 tail_node->next = head_node->data;
                 double_linked.update(&tail_node->data,tail_node);
                 head_node->next = 0;
@@ -231,15 +253,24 @@ int xdp_tcp_syn(struct xdp_md *ctx) {
         if (!tcp->syn && tcp->ack) {
             struct node_index *index = idx_from_ip_ports.lookup(&packet_key);
             if(!index){
-                return XDP_DROP;
+                return XDP_PASS;
             }
-            struct queue_node *curr_node = double_linked.lookup(&index);
+            struct queue_node *curr_node = double_linked.lookup((void *)&index);
             struct queue_node *prev_node,*next_node;
+            if(!(curr_node)){
+                return XDP_PASS;
+            }
+                
             prev_node = double_linked.lookup(&curr_node->prev);
-            next_node = double_linked.lookup(&next_node->prev);
-
+            next_node = double_linked.lookup(&curr_node->next);
+            if(!(prev_node)){
+                return XDP_PASS;
+            }
+            if(!(next_node)){
+                return XDP_PASS;
+            }
             //implement the remove from the hash
-            bpf_map_delete_elem(&idx_from_ip_ports,&packet_key);
+            //bpf_map_delete_elem(&idx_from_ip_ports,&packet_key);
             
             //connect queue
             prev_node->next = curr_node->next;
@@ -250,7 +281,13 @@ int xdp_tcp_syn(struct xdp_md *ctx) {
             //add curr_node to the head 
             curr_node->is_used = 0;
             __u32 *head = head_tail_size.lookup(&zero);
+            if(!head){
+                return XDP_PASS;
+            }
             struct queue_node *head_node = double_linked.lookup(head); 
+            if(!head_node){
+                return XDP_PASS;
+            }
             head_node->prev = curr_node->data;
             curr_node->prev = 0;
             curr_node->next = head_node->data;
