@@ -7,7 +7,7 @@ import sys
 import ctypes
 
 b = BPF(src_file="kernel.c")
-interface = "enp0s3"
+interface = "lo"
 
 
 fx = b.load_func("xdp_tcp_rst", BPF.XDP)

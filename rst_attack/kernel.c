@@ -8,8 +8,8 @@
 #include <linux/pkt_cls.h>
 
 #define SIZEOFPORTS 65536
-#define TIMEOUT  1000
-#define THRESHOLD 100
+#define TIMEOUT  1000000000
+#define THRESHOLD 10
 
 struct port_node{
     __u64 port_time;
@@ -76,16 +76,19 @@ int xdp_tcp_rst(struct xdp_md *ctx) {
             node->port_time = curr_time;
             node->rst_cnt = 1;
             bpf_spin_unlock(&node->semaphore);
+            bpf_trace_printk("Passed");
             return XDP_PASS;
         }
         else{
             if(node->rst_cnt<THRESHOLD){
                 node->rst_cnt++;
                 bpf_spin_unlock(&node->semaphore);
+                bpf_trace_printk("Passed");
                 return XDP_PASS;
             }
             else{
                 bpf_spin_unlock(&node->semaphore);
+                bpf_trace_printk("Dropped");
                 return XDP_DROP;
             }
         }
