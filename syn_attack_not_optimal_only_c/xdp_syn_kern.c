@@ -4,8 +4,11 @@
 #include <linux/tcp.h>
 #include <linux/icmp.h>
 #include <linux/ipv6.h>
-#include <bcc/proto.h>
 #include <linux/pkt_cls.h>
+#include <bpf/bpf_helpers.h>
+#include <linux/in.h>     // for IPPROTO_TCP, IPPROTO_IPV6 (for IPv4)
+#include <linux/in6.h>    // for IPv6 headers
+
 
 #define limit 1000
 #define extra_time  1000
@@ -104,7 +107,9 @@ int xdp_tcp_syn(struct xdp_md *ctx) {
     __u64 *size_allowed,*old_time;
     size_allowed = bpf_map_lookup_elem(&syn_size_oldtime,&zero);
     old_time = bpf_map_lookup_elem(&syn_size_oldtime,&one);
-
+    if(!size_allowed || !old_time){
+        return XDP_PASS;
+    }
     if(!(tcp->fin  ||
         tcp->psh || 
         tcp->urg || 
@@ -136,7 +141,7 @@ int xdp_tcp_syn(struct xdp_md *ctx) {
             }
         }
         if (tcp->syn && tcp->ack) {
-            bpf_trace_printk("TCP SYN-ACK packet detected!\n");
+            bpf_printk("TCP SYN-ACK packet detected!\n");
             return XDP_PASS;
         }
         if (!tcp->syn && tcp->ack) {
@@ -144,7 +149,7 @@ int xdp_tcp_syn(struct xdp_md *ctx) {
             __u64 *packet_time = bpf_map_lookup_elem(&syn_lru_hash_map,&packet_key);
             if(!packet_time){
                 //  if yes check time is in range
-                if(packet_key < old_time+extra_time){
+                if(*packet_time < *old_time + extra_time){
                     //size =-1 remove from map and PASS
                     *size_allowed -= 1;
                     bpf_map_delete_elem(&syn_lru_hash_map,&packet_key);
