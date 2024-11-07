@@ -10,8 +10,8 @@
 #include <linux/in6.h>    // for IPv6 headers
 
 
-#define limit 1000
-#define extra_time  1000
+#define limit 10
+#define extra_time  1000000000
 
 struct __u128 {
     __u64 hi; // Higher 64 bits for IPv6
@@ -124,18 +124,21 @@ int xdp_tcp_syn(struct xdp_md *ctx) {
                 *size_allowed = 1;
                 *old_time = curr_time;
                 bpf_map_update_elem(&syn_lru_hash_map,&packet_key,&curr_time,BPF_ANY);
+                bpf_printk("Passed");
                 return XDP_PASS;
             }
             else{
                 // else check size == limit
                 if(*size_allowed == limit){
                     // if yes DROP
+                    bpf_printk("Dropped");
                     return XDP_DROP;
                 }
                 else{
                     //else update size and insert into hash and PASS
                     *size_allowed += 1;
                     bpf_map_update_elem(&syn_lru_hash_map,&packet_key,&curr_time,BPF_ANY);
+                    bpf_printk("Passed");
                     return XDP_PASS;
                 }
             }
