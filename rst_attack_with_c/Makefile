@@ -16,7 +16,7 @@ load: xdp_rst_kern.o
 	sudo ip link set dev $(IFACE) xdp obj xdp_rst_kern.o section xdp
 	sudo mkdir -p /sys/fs/bpf
 	sudo mount -t bpf none /sys/fs/bpf
-#sudo bpftool map pin name port_rst /sys/fs/bpf/port_rst
+#sudo bpftool map pin name port_rst /sys/fs/bpf/tcp_rst_port
 
 detach:
 	sudo ip link set dev $(IFACE) xdp off

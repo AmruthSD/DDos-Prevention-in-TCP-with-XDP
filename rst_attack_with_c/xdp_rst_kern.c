@@ -26,7 +26,7 @@ struct {
     __uint(max_entries, SIZEOFPORTS);      
     __type(key, __u32);            
     __type(value, struct port_node);          
-} port_rst SEC(".maps");
+} tcp_rst_port SEC(".maps");
 
 
 SEC("xdp")
@@ -76,7 +76,7 @@ int xdp_tcp_rst(struct xdp_md *ctx) {
     }
     __u32 dest = tcp->dest; 
     if(tcp->rst){
-        struct port_node *node = bpf_map_lookup_elem(&port_rst,&dest);
+        struct port_node *node = bpf_map_lookup_elem(&tcp_rst_port,&dest);
         if(!node){
             return XDP_PASS;
         }

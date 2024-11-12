@@ -42,14 +42,14 @@ struct {
     __uint(max_entries, 2);      
     __type(key, __u32);            
     __type(value, __u64);          
-} syn_size_oldtime SEC(".maps");
+} tcp_syn_size_oldtime SEC(".maps");
 
 struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __uint(max_entries, 1000);      
     __type(key, struct packet_id_key);            
     __type(value, __u64);          
-} syn_lru_hash_map SEC(".maps");
+} tcp_syn_lru_hash_map SEC(".maps");
 
 SEC("xdp")
 int xdp_tcp_syn(struct xdp_md *ctx) {
@@ -105,8 +105,8 @@ int xdp_tcp_syn(struct xdp_md *ctx) {
     packet_key.dest = tcp->dest;
     packet_key.source = tcp->source;
     __u64 *size_allowed,*old_time;
-    size_allowed = bpf_map_lookup_elem(&syn_size_oldtime,&zero);
-    old_time = bpf_map_lookup_elem(&syn_size_oldtime,&one);
+    size_allowed = bpf_map_lookup_elem(&tcp_syn_size_oldtime,&zero);
+    old_time = bpf_map_lookup_elem(&tcp_syn_size_oldtime,&one);
     if(!size_allowed || !old_time){
         return XDP_PASS;
     }
@@ -123,7 +123,7 @@ int xdp_tcp_syn(struct xdp_md *ctx) {
                 // if yes update old time and make size as 1
                 *size_allowed = 1;
                 *old_time = curr_time;
-                bpf_map_update_elem(&syn_lru_hash_map,&packet_key,&curr_time,BPF_ANY);
+                bpf_map_update_elem(&tcp_syn_lru_hash_map,&packet_key,&curr_time,BPF_ANY);
                 bpf_printk("Passed");
                 return XDP_PASS;
             }
@@ -137,7 +137,7 @@ int xdp_tcp_syn(struct xdp_md *ctx) {
                 else{
                     //else update size and insert into hash and PASS
                     *size_allowed += 1;
-                    bpf_map_update_elem(&syn_lru_hash_map,&packet_key,&curr_time,BPF_ANY);
+                    bpf_map_update_elem(&tcp_syn_lru_hash_map,&packet_key,&curr_time,BPF_ANY);
                     bpf_printk("Passed");
                     return XDP_PASS;
                 }
@@ -149,13 +149,13 @@ int xdp_tcp_syn(struct xdp_md *ctx) {
         }
         if (!tcp->syn && tcp->ack) {
             //check if element is present
-            __u64 *packet_time = bpf_map_lookup_elem(&syn_lru_hash_map,&packet_key);
+            __u64 *packet_time = bpf_map_lookup_elem(&tcp_syn_lru_hash_map,&packet_key);
             if(!packet_time){
                 //  if yes check time is in range
                 if(*packet_time < *old_time + extra_time){
                     //size =-1 remove from map and PASS
                     *size_allowed -= 1;
-                    bpf_map_delete_elem(&syn_lru_hash_map,&packet_key);
+                    bpf_map_delete_elem(&tcp_syn_lru_hash_map,&packet_key);
                     return XDP_PASS;
                 }
                 else{
