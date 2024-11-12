@@ -14,7 +14,7 @@
 #define TIMEOUT  1000000000
 #define THRESHOLD 10
 
-struct port_node{
+struct tcp_rst_port_node{
     __u64 port_time;
     __u32 rst_cnt;
     struct bpf_spin_lock semaphore;
@@ -25,7 +25,7 @@ struct {
     __uint(type, BPF_MAP_TYPE_ARRAY);
     __uint(max_entries, SIZEOFPORTS);      
     __type(key, __u32);            
-    __type(value, struct port_node);          
+    __type(value, struct tcp_rst_port_node);          
 } tcp_rst_port SEC(".maps");
 
 
@@ -76,7 +76,7 @@ int xdp_tcp_rst(struct xdp_md *ctx) {
     }
     __u32 dest = tcp->dest; 
     if(tcp->rst){
-        struct port_node *node = bpf_map_lookup_elem(&tcp_rst_port,&dest);
+        struct tcp_rst_port_node *node = bpf_map_lookup_elem(&tcp_rst_port,&dest);
         if(!node){
             return XDP_PASS;
         }

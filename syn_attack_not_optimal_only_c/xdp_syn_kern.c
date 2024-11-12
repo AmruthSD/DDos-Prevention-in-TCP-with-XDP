@@ -13,22 +13,18 @@
 #define limit 10
 #define extra_time  1000000000
 
-struct __u128 {
+struct tcp_syn__u128 {
     __u64 hi; // Higher 64 bits for IPv6
     __u64 lo; // Lower 64 bits for IPv6
 };
 
-union ip_address {
+union tcp_syn_ip_address {
     __u32 ipv4;           // 32-bit IPv4 address
-    struct __u128 ipv6;   // 128-bit IPv6 address
+    struct tcp_syn__u128 ipv6;   // 128-bit IPv6 address
 };
 
-struct node_index{
-    __u32 index;
-};
-
-struct packet_id_key{
-    union ip_address ipadd; // IPv4 or IPv6
+struct tcp_syn_packet_id_key{
+    union tcp_syn_ip_address ipadd; // IPv4 or IPv6
     __u16 dest;
     __u16 source;
     __u8 ip_type;
@@ -47,14 +43,14 @@ struct {
 struct {
     __uint(type, BPF_MAP_TYPE_LRU_HASH);
     __uint(max_entries, 1000);      
-    __type(key, struct packet_id_key);            
+    __type(key, struct tcp_syn_packet_id_key);            
     __type(value, __u64);          
 } tcp_syn_lru_hash_map SEC(".maps");
 
 SEC("xdp")
 int xdp_tcp_syn(struct xdp_md *ctx) {
     __u32 zero = 0,one = 1;
-    struct packet_id_key packet_key;
+    struct tcp_syn_packet_id_key packet_key;
     void *data_end = (void *)(long)ctx->data_end;
     void *data = (void *)(long)ctx->data;
 
